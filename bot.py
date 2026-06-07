@@ -184,8 +184,10 @@ class FireHireBot(discord.Client):
         # بياخد الداتا من الشيت
         try:
             rows = get_sheet_data()
-        except Exception as e:
+       except Exception as e:
+            import traceback
             print(f"❌ Google Sheets error: {e}")
+            print(traceback.format_exc())
             return
 
         state = load_state()

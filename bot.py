@@ -8,6 +8,7 @@ FireHire RS — Discord Bot (Python)
 
 import os
 import json
+import traceback
 import asyncio
 import gspread
 import discord
@@ -23,14 +24,12 @@ CHANNEL_ID         = 1511896531786268712
 SPREADSHEET_ID     = os.environ["SPREADSHEET_ID"]
 SHEET_NAME         = "The Validation"
 
-# الـ columns اللي نراقبها للفيدباك
 FEEDBACK_COLS = [
     "Feedback of VN",
     "Feedback of Call",
     "Company Feedback",
 ]
 
-# ملف بيحفظ آخر state (داخل GitHub Actions بنعمله artifact أو نحفظه في repo)
 STATE_FILE = "last_state.json"
 
 SCOPES = [
@@ -43,15 +42,38 @@ SCOPES = [
 # ═══════════════════════════════════════════
 
 def get_sheet_data():
-    """بياخد كل الداتا من الشيت"""
-    creds_json = os.environ["GOOGLE_CREDENTIALS"]
-    creds_dict = json.loads(creds_json)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet(SHEET_NAME)
-    records = ws.get_all_records()
-    return records
+    try:
+        print("🔍 Step 1: Reading GOOGLE_CREDENTIALS...")
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS", "")
+        if not creds_json:
+            raise ValueError("GOOGLE_CREDENTIALS is empty!")
+        print(f"🔍 Step 2: Credentials length = {len(creds_json)} chars")
+
+        print("🔍 Step 3: Parsing JSON...")
+        creds_dict = json.loads(creds_json)
+        print(f"🔍 Step 4: type={creds_dict.get('type')} | email={creds_dict.get('client_email')}")
+
+        print("🔍 Step 5: Creating credentials object...")
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+
+        print("🔍 Step 6: Authorizing gspread...")
+        gc = gspread.authorize(creds)
+
+        print(f"🔍 Step 7: Opening spreadsheet ID={SPREADSHEET_ID}...")
+        sh = gc.open_by_key(SPREADSHEET_ID)
+
+        print(f"🔍 Step 8: Opening worksheet '{SHEET_NAME}'...")
+        ws = sh.worksheet(SHEET_NAME)
+
+        print("🔍 Step 9: Getting all records...")
+        records = ws.get_all_records()
+        print(f"✅ Sheet OK — got {len(records)} rows.")
+        return records
+
+    except Exception as e:
+        print(f"❌ get_sheet_data FAILED at: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        raise
 
 # ═══════════════════════════════════════════
 #  STATE MANAGEMENT
@@ -68,13 +90,11 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 def get_row_key(row):
-    """مفتاح فريد لكل صف بالإيميل أو الاسم"""
     email = str(row.get("Email", "")).strip().lower()
     name  = str(row.get("Full Name", "")).strip()
     return email if email else name
 
 def get_feedback_state(row):
-    """بياخد قيم الفيدباك الحالية"""
     return {col: str(row.get(col, "")).strip() for col in FEEDBACK_COLS}
 
 # ═══════════════════════════════════════════
@@ -90,21 +110,19 @@ def build_new_submission_embed(row):
     )
     embed.add_field(name="👤 Full Name",        value=row.get("Full Name", "N/A")    or "N/A", inline=True)
     embed.add_field(name="🏢 Company",          value=row.get("Company Name you are applying for", "N/A") or "N/A", inline=True)
-    embed.add_field(name="\u200B",              value="\u200B",                                 inline=False)
+    embed.add_field(name="\u200B",              value="\u200B", inline=False)
     embed.add_field(name="🎯 Recruiter",        value=row.get("Recruiter Name", "N/A") or "N/A", inline=True)
     embed.add_field(name="👑 Team Leader",      value=row.get("Team Leader Name", "N/A") or "N/A", inline=True)
-    embed.add_field(name="\u200B",              value="\u200B",                                 inline=False)
+    embed.add_field(name="\u200B",              value="\u200B", inline=False)
     embed.add_field(name="📞 Phone",            value=str(row.get("Phone", "") or row.get("Mobile", "") or "N/A"), inline=True)
-    embed.add_field(name="📧 Email",            value=row.get("Email", "N/A")         or "N/A", inline=True)
-    embed.add_field(name="\u200B",              value="\u200B",                                 inline=False)
-    embed.add_field(name="🌍 Nationality",      value=row.get("Nationality", "N/A")   or "N/A", inline=True)
-    embed.add_field(name="🎓 Graduation",       value=row.get("Graduation", "N/A")    or "N/A", inline=True)
+    embed.add_field(name="📧 Email",            value=row.get("Email", "N/A") or "N/A", inline=True)
+    embed.add_field(name="\u200B",              value="\u200B", inline=False)
+    embed.add_field(name="🌍 Nationality",      value=row.get("Nationality", "N/A") or "N/A", inline=True)
+    embed.add_field(name="🎓 Graduation",       value=row.get("Graduation", "N/A") or "N/A", inline=True)
     embed.add_field(name="💼 Experience in CS", value=row.get("Experience In Customer Services/Telesales/CC", "N/A") or "N/A", inline=False)
-
     vocaroo = row.get("Meeting Link", "") or row.get("Vocaroo", "")
     if vocaroo:
         embed.add_field(name="🎙️ Vocaroo Link", value=vocaroo, inline=False)
-
     embed.set_footer(text=f"FireHire RS | Form Submission • {now}")
     return embed
 
@@ -116,7 +134,6 @@ def build_feedback_embed(row, col, old_val, new_val):
     tl        = row.get("Team Leader Name", "N/A")
     now       = datetime.now(timezone.utc).strftime("%m/%d/%Y %I:%M %p")
 
-    # الألوان والإيموجيز حسب النتيجة
     val_lower = new_val.lower()
     if "accepted" in val_lower:
         color, emoji, label = 0x22C55E, "✅", "Accepted"
@@ -133,7 +150,6 @@ def build_feedback_embed(row, col, old_val, new_val):
     else:
         color, emoji, label = 0x2563EB, "🔔", new_val
 
-    # اسم الـ Stage
     if "VN" in col or "vn" in col.lower():
         stage = "🎙️ Voice Note Stage"
     elif "Call" in col:
@@ -181,13 +197,10 @@ class FireHireBot(discord.Client):
             print(f"❌ Channel {CHANNEL_ID} not found!")
             return
 
-        # بياخد الداتا من الشيت
         try:
             rows = get_sheet_data()
-       except Exception as e:
-            import traceback
-            print(f"❌ Google Sheets error: {e}")
-            print(traceback.format_exc())
+        except Exception as e:
+            print(f"❌ Google Sheets error: {type(e).__name__}: {e}")
             return
 
         state = load_state()
@@ -202,7 +215,6 @@ class FireHireBot(discord.Client):
             if not key:
                 continue
 
-            # ── سابميشن جديد ──
             if key not in seen_emails:
                 print(f"🆕 New submission: {key}")
                 embed = build_new_submission_embed(row)
@@ -215,15 +227,12 @@ class FireHireBot(discord.Client):
                     print(f"❌ Discord send error: {e}")
                 new_seen.add(key)
 
-            # ── فيدباك اتغير ──
             current_fb = get_feedback_state(row)
             old_fb     = feedback_states.get(key, {})
 
             for col in FEEDBACK_COLS:
                 old_val = old_fb.get(col, "")
                 new_val = current_fb.get(col, "")
-
-                # نبعت بس لو في قيمة جديدة وهي مختلفة عن القديمة
                 if new_val and new_val != old_val:
                     print(f"🔄 Feedback changed [{col}]: {key} → {new_val}")
                     embed = build_feedback_embed(row, col, old_val, new_val)
@@ -237,7 +246,6 @@ class FireHireBot(discord.Client):
 
             new_feedback[key] = current_fb
 
-        # حفظ الـ state
         save_state({
             "seen_emails":     list(new_seen),
             "feedback_states": new_feedback

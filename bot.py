@@ -131,7 +131,7 @@ def build_feedback_embed(row, col, old_val, new_val):
     name      = row.get("Full Name", "N/A")
     company   = row.get("Company Name you are applying for", "N/A")
     recruiter = row.get("Recruiter Name", "N/A")
-    tl        = row.get("Team Leader Name", "N/A")
+    tl        = str(row.get("Team Leader Name", "") or row.get("TL Name", "") or row.get("Team Leader", "") or "N/A").strip() or "N/A"
     now       = datetime.now(timezone.utc).strftime("%m/%d/%Y %I:%M %p")
 
     val_lower = new_val.lower()

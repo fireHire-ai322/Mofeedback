@@ -112,7 +112,7 @@ def build_new_submission_embed(row):
     embed.add_field(name="🏢 Company",          value=row.get("Company Name you are applying for", "N/A") or "N/A", inline=True)
     embed.add_field(name="\u200B",              value="\u200B", inline=False)
     embed.add_field(name="🎯 Recruiter",        value=row.get("Recruiter Name", "N/A") or "N/A", inline=True)
-    embed.add_field(name="👑 Team Leader",      value=row.get("Team Leader Name", "N/A") or "N/A", inline=True)
+    embed.add_field(name="👑 Team Leader",      value=str(row.get("Team Leader Name", "") or row.get("TL Name", "") or row.get("Team Leader", "") or "N/A").strip() or "N/A", inline=True)
     embed.add_field(name="\u200B",              value="\u200B", inline=False)
     embed.add_field(name="📞 Phone",            value=str(row.get("Phone", "") or row.get("Mobile", "") or "N/A"), inline=True)
     embed.add_field(name="📧 Email",            value=row.get("Email", "N/A") or "N/A", inline=True)

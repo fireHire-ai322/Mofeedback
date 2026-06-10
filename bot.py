@@ -275,7 +275,7 @@ class FireHireBot(discord.Client):
 
 def main():
     bot = FireHireBot()
-    bot.run(DISCORD_TOKEN)
+    bot.run(DISCORD_TOKEN, log_handler=None, log_level=10)  # debug logging
 
 
 if __name__ == "__main__":

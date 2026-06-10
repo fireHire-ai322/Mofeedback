@@ -238,6 +238,7 @@ class FireHireBot(discord.Client):
 
     def __init__(self):
         intents = discord.Intents.default()
+        intents.guilds = True          # ← أضف السطر ده
         super().__init__(intents=intents)
         self._start_time = time.monotonic()
 

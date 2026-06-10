@@ -240,30 +240,32 @@ class FireHireBot(discord.Client):
         self._start_time = time.monotonic()
 
     async def on_ready(self):
-        print(f"✅ FireHire Bot online as {self.user}")
-        await self.monitor_loop()
+    print(f"✅ FireHire Bot online as {self.user}")
+    await self.monitor_loop()
 
-    async def monitor_loop(self):
-        print(f"⏰ Monitor loop started — interval={CHECK_INTERVAL_SECONDS}s | max runtime={MAX_RUNTIME_MINUTES}min")
+async def monitor_loop(self):
+    print(f"⏰ Monitor loop started — interval={CHECK_INTERVAL_SECONDS}s | max runtime={MAX_RUNTIME_MINUTES}min")
 
-        channel = self.get_channel(CHANNEL_ID)
-        if channel is None:
-            print(f"❌ Channel {CHANNEL_ID} not found!")
+    # ← غيّر السطر ده
+    try:
+        channel = await self.fetch_channel(CHANNEL_ID)
+    except Exception as e:
+        print(f"❌ Channel fetch failed: {e}")
+        await self.close()
+        return
+
+    print(f"✅ Channel found: #{channel.name}")  # ← للتأكد
+
+    while True:
+        elapsed_min = (time.monotonic() - self._start_time) / 60
+        if elapsed_min >= MAX_RUNTIME_MINUTES:
+            print(f"⏳ Max runtime reached. Closing...")
             await self.close()
             return
 
-        while True:
-            # هل عدّينا الـ MAX_RUNTIME؟
-            elapsed_min = (time.monotonic() - self._start_time) / 60
-            if elapsed_min >= MAX_RUNTIME_MINUTES:
-                print(f"⏳ Max runtime ({MAX_RUNTIME_MINUTES}min) reached. Closing gracefully...")
-                await self.close()
-                return
-
-            print(f"🔍 Running check... (elapsed: {elapsed_min:.1f}min)")
-            await run_check(channel)
-            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
-
+        print(f"🔍 Running check... (elapsed: {elapsed_min:.1f}min)")
+        await run_check(channel)
+        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
 
 def main():
     bot = FireHireBot()

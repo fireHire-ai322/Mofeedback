@@ -173,17 +173,19 @@ async def run_check(channel):
         print(f"❌ Google Sheets error: {type(e).__name__}: {e}")
         return
 
-    # ← أضف السطرين دول
     print(f"📊 Rows fetched: {len(rows)}")
     if rows:
         print(f"🔑 Column names: {list(rows[0].keys())}")
 
-    state = load_state()
-    seen_emails = set(state.get("seen_emails", []))
+    state           = load_state()
+    seen_emails     = set(state.get("seen_emails", []))
     feedback_states = state.get("feedback_states", {})
 
-    print(f"👁️ Already seen: {len(seen_emails)} entries")  # ← وده
-    # ... باقي الكود
+    print(f"👁️ Already seen: {len(seen_emails)} entries")
+
+    new_seen     = set(seen_emails)
+    new_feedback = dict(feedback_states)
+
     for row in rows:
         key = get_row_key(row)
         if not key:
@@ -240,32 +242,31 @@ class FireHireBot(discord.Client):
         self._start_time = time.monotonic()
 
     async def on_ready(self):
-    print(f"✅ FireHire Bot online as {self.user}")
-    await self.monitor_loop()
+        print(f"✅ FireHire Bot online as {self.user}")
+        await self.monitor_loop()
 
-async def monitor_loop(self):
-    print(f"⏰ Monitor loop started — interval={CHECK_INTERVAL_SECONDS}s | max runtime={MAX_RUNTIME_MINUTES}min")
+    async def monitor_loop(self):
+        print(f"⏰ Monitor loop started — interval={CHECK_INTERVAL_SECONDS}s | max runtime={MAX_RUNTIME_MINUTES}min")
 
-    # ← غيّر السطر ده
-    try:
-        channel = await self.fetch_channel(CHANNEL_ID)
-    except Exception as e:
-        print(f"❌ Channel fetch failed: {e}")
-        await self.close()
-        return
-
-    print(f"✅ Channel found: #{channel.name}")  # ← للتأكد
-
-    while True:
-        elapsed_min = (time.monotonic() - self._start_time) / 60
-        if elapsed_min >= MAX_RUNTIME_MINUTES:
-            print(f"⏳ Max runtime reached. Closing...")
+        try:
+            channel = await self.fetch_channel(CHANNEL_ID)
+            print(f"✅ Channel found: #{channel.name}")
+        except Exception as e:
+            print(f"❌ Channel fetch failed: {e}")
             await self.close()
             return
 
-        print(f"🔍 Running check... (elapsed: {elapsed_min:.1f}min)")
-        await run_check(channel)
-        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+        while True:
+            elapsed_min = (time.monotonic() - self._start_time) / 60
+            if elapsed_min >= MAX_RUNTIME_MINUTES:
+                print(f"⏳ Max runtime ({MAX_RUNTIME_MINUTES}min) reached. Closing gracefully...")
+                await self.close()
+                return
+
+            print(f"🔍 Running check... (elapsed: {elapsed_min:.1f}min)")
+            await run_check(channel)
+            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
 
 def main():
     bot = FireHireBot()

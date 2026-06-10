@@ -242,6 +242,10 @@ class FireHireBot(discord.Client):
         super().__init__(intents=intents)
         self._start_time = time.monotonic()
 
+    async def setup_hook(self):
+        # بيتكال أوتوماتيك بعد login وقبل gateway
+        self.loop.create_task(self.monitor_loop())
+        
     async def on_ready(self):
         print(f"✅ FireHire Bot online as {self.user}")
         await self.monitor_loop()

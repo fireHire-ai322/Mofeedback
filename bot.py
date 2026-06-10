@@ -171,7 +171,9 @@ async def run_check(channel):
         rows = get_sheet_data()
     except Exception as e:
         print(f"❌ Google Sheets error: {type(e).__name__}: {e}")
-        return
+    print(f"📊 Rows fetched: {len(rows)}")
+    if rows:
+        print(f"🔑 Column names: {list(rows[0].keys())}")    return
 
     state           = load_state()
     seen_emails     = set(state.get("seen_emails", []))

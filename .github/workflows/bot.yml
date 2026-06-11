@@ -1,14 +1,13 @@
-name: FireHire Discord Bot 24/7
+name: FireHire Discord Bot
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
     permissions:
       contents: write
 
@@ -24,22 +23,60 @@ jobs:
           python-version: "3.11"
 
       - name: Restore state cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache@v4
         with:
           path: last_state.json
-          key: firehire-state-v1-${{ github.run_id }}
-          restore-keys: |
-            firehire-state-v1-
+          key: firehire-state-v1
+          restore-keys: firehire-state-v1
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install discord.py gspread google-auth
 
-      - name: Run Bot (5.5-hour window)
+      - name: Run check 1
         env:
-          DISCORD_TOKEN:           ${{ secrets.DISCORD_TOKEN }}
-          SPREADSHEET_ID:          ${{ secrets.SPREADSHEET_ID }}
-          GOOGLE_CREDENTIALS:      ${{ secrets.GOOGLE_CREDENTIALS }}
-          BOT_MAX_RUNTIME_MINUTES: '330'
+          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
+          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: python bot.py
+
+      - name: Wait 60s
+        run: sleep 60
+
+      - name: Run check 2
+        env:
+          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
+          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: python bot.py
+
+      - name: Wait 60s
+        run: sleep 60
+
+      - name: Run check 3
+        env:
+          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
+          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: python bot.py
+
+      - name: Wait 60s
+        run: sleep 60
+
+      - name: Run check 4
+        env:
+          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
+          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: python bot.py
+
+      - name: Wait 60s
+        run: sleep 60
+
+      - name: Run check 5
+        env:
+          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
+          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python bot.py
 
       - name: Save state cache
@@ -47,4 +84,4 @@ jobs:
         if: always()
         with:
           path: last_state.json
-          key: firehire-state-v1-${{ github.run_id }}
+          key: firehire-state-v1

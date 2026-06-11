@@ -1,16 +1,14 @@
 """
-FireHire RS — Discord Bot (Python)
-- يراقب Google Sheet كل دقيقة
-- يبعت رسالة لما يجي سابميشن جديد
-- يبعت رسالة لما يتغير اي فيدباك
-- بيشتغل 24/7 على GitHub Actions (long-running loop)
+FireHire RS — Discord Bot
+- يشتغل مرة واحدة، يعمل check، ويقفل
+- GitHub Actions بيشغله كل 5 دقايق
+- الـ state محفوظ في GitHub Actions Cache
 """
 
 import os
 import json
 import traceback
 import asyncio
-import time
 import gspread
 import discord
 from google.oauth2.service_account import Credentials
@@ -38,12 +36,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# كل كام دقيقة يعمل check (بالثواني)
-CHECK_INTERVAL_SECONDS = 60
-
-# الحد الاقصى للتشغيل قبل ما يوقف نفسه (5.5 ساعة = 330 دقيقة)
-MAX_RUNTIME_MINUTES = int(os.environ.get("BOT_MAX_RUNTIME_MINUTES", "330"))
-
 # ═══════════════════════════════════════════
 #  GOOGLE SHEETS
 # ═══════════════════════════════════════════
@@ -58,8 +50,26 @@ def get_sheet_data():
     gc         = gspread.authorize(creds)
     sh         = gc.open_by_key(SPREADSHEET_ID)
     ws         = sh.worksheet(SHEET_NAME)
-    records    = ws.get_all_records()
-    return records
+
+    # بنقرأ الشيت يدوياً عشان نتجنب مشكلة الـ headers المكررة
+    rows = ws.get_all_values()
+    if not rows:
+        return []
+
+    headers = [h.strip() for h in rows[0]]
+    data    = []
+    for row in rows[1:]:
+        if not any(cell.strip() for cell in row):
+            continue
+        row_dict = {}
+        for i, val in enumerate(row):
+            if i < len(headers):
+                key = headers[i] if headers[i] else f"_col_{i}"
+                row_dict[key] = val
+        data.append(row_dict)
+
+    print(f"✅ Sheet OK — got {len(data)} rows.")
+    return data
 
 # ═══════════════════════════════════════════
 #  STATE MANAGEMENT
@@ -88,7 +98,6 @@ def get_feedback_state(row):
 # ═══════════════════════════════════════════
 
 def build_new_submission_embed(row):
-    now = datetime.now(timezone.utc).strftime("%m/%d/%Y %I:%M %p")
     embed = discord.Embed(
         title="🔥 New Application Submitted!",
         color=0xFF4B2B,
@@ -98,27 +107,26 @@ def build_new_submission_embed(row):
     embed.add_field(name="🏢 Company",          value=row.get("Company Name you are applying for", "N/A") or "N/A", inline=True)
     embed.add_field(name="\u200B",              value="\u200B", inline=False)
     embed.add_field(name="🎯 Recruiter",        value=row.get("Recruiter Name", "N/A") or "N/A", inline=True)
-    embed.add_field(name="👑 Team Leader",      value=str(row.get("Team Leader Name", "") or row.get("TL Name", "") or row.get("Team Leader", "") or "N/A").strip() or "N/A", inline=True)
+    embed.add_field(name="👑 Team Leader",      value=str(row.get("Team Leader Name ", "") or row.get("Team Leader Name", "") or "N/A").strip() or "N/A", inline=True)
     embed.add_field(name="\u200B",              value="\u200B", inline=False)
-    embed.add_field(name="📞 Phone",            value=str(row.get("Phone", "") or row.get("Mobile", "") or "N/A"), inline=True)
+    embed.add_field(name="📞 Phone",            value=str(row.get("Phone Number", "") or row.get("Phone", "") or "N/A"), inline=True)
     embed.add_field(name="📧 Email",            value=row.get("Email", "N/A") or "N/A", inline=True)
     embed.add_field(name="\u200B",              value="\u200B", inline=False)
     embed.add_field(name="🌍 Nationality",      value=row.get("Nationality", "N/A") or "N/A", inline=True)
     embed.add_field(name="🎓 Graduation",       value=row.get("Graduation", "N/A") or "N/A", inline=True)
     embed.add_field(name="💼 Experience in CS", value=row.get("Experience In Customer Services/Telesales/CC", "N/A") or "N/A", inline=False)
-    vocaroo = row.get("Meeting Link", "") or row.get("Vocaroo", "")
+    vocaroo = row.get("Vocaroo Link \nNotice : on this link https://vocaroo.com , rec or Upload your Voice Note , and put here your Vocaroo Link To validate it", "") or row.get("Meeting Link", "")
     if vocaroo:
         embed.add_field(name="🎙️ Vocaroo Link", value=vocaroo, inline=False)
-    embed.set_footer(text=f"FireHire RS | Form Submission • {now}")
+    embed.set_footer(text="FireHire RS | Form Submission")
     return embed
 
 
-def build_feedback_embed(row, col, old_val, new_val):
+def build_feedback_embed(row, col, new_val):
     name      = row.get("Full Name", "N/A")
     company   = row.get("Company Name you are applying for", "N/A")
     recruiter = row.get("Recruiter Name", "N/A")
-    tl        = str(row.get("Team Leader Name", "") or row.get("TL Name", "") or row.get("Team Leader", "") or "N/A").strip() or "N/A"
-    now       = datetime.now(timezone.utc).strftime("%m/%d/%Y %I:%M %p")
+    tl        = str(row.get("Team Leader Name ", "") or row.get("Team Leader Name", "") or "N/A").strip() or "N/A"
 
     val_lower = new_val.lower()
     if "accepted" in val_lower:
@@ -159,123 +167,94 @@ def build_feedback_embed(row, col, old_val, new_val):
     embed.add_field(name="\u200B",         value="\u200B",            inline=False)
     embed.add_field(name="📊 Stage",       value=stage,               inline=True)
     embed.add_field(name="🏁 Result",      value=f"**{label}**",      inline=True)
-    embed.set_footer(text=f"FireHire RS | Feedback Update • {now}")
+    embed.set_footer(text="FireHire RS | Feedback Update")
     return embed
 
 # ═══════════════════════════════════════════
-#  CHECK LOGIC
-# ═══════════════════════════════════════════
-
-async def run_check(channel):
-    try:
-        rows = get_sheet_data()
-    except Exception as e:
-        print(f"❌ Google Sheets error: {type(e).__name__}: {e}")
-        return
-
-    print(f"📊 Rows fetched: {len(rows)}")
-    if rows:
-        print(f"🔑 Column names: {list(rows[0].keys())}")
-
-    state           = load_state()
-    seen_emails     = set(state.get("seen_emails", []))
-    feedback_states = state.get("feedback_states", {})
-
-    print(f"👁️ Already seen: {len(seen_emails)} entries")
-
-    new_seen     = set(seen_emails)
-    new_feedback = dict(feedback_states)
-
-    for row in rows:
-        key = get_row_key(row)
-        if not key:
-            continue
-
-        # سابميشن جديد
-        if key not in seen_emails:
-            print(f"🆕 New submission: {key}")
-            embed = build_new_submission_embed(row)
-            try:
-                await channel.send(
-                    content="📣 **New Application** — Please review and assign!",
-                    embed=embed
-                )
-            except Exception as e:
-                print(f"❌ Discord send error: {e}")
-            new_seen.add(key)
-
-        # فيدباك اتغير
-        current_fb = get_feedback_state(row)
-        old_fb     = feedback_states.get(key, {})
-
-        for col in FEEDBACK_COLS:
-            old_val = old_fb.get(col, "")
-            new_val = current_fb.get(col, "")
-            if new_val and new_val != old_val:
-                print(f"🔄 Feedback changed [{col}]: {key} -> {new_val}")
-                embed = build_feedback_embed(row, col, old_val, new_val)
-                try:
-                    await channel.send(
-                        content="📣 **New Feedback Update** — Please review and notify the candidate if needed.",
-                        embed=embed
-                    )
-                except Exception as e:
-                    print(f"❌ Discord send error: {e}")
-
-        new_feedback[key] = current_fb
-
-    save_state({
-        "seen_emails":     list(new_seen),
-        "feedback_states": new_feedback
-    })
-    print(f"✅ Check complete — {len(rows)} rows processed.")
-
-# ═══════════════════════════════════════════
-#  MAIN BOT — LONG-RUNNING LOOP
+#  MAIN BOT
 # ═══════════════════════════════════════════
 
 class FireHireBot(discord.Client):
 
     def __init__(self):
         intents = discord.Intents.default()
-        intents.guilds = True          # ← أضف السطر ده
         super().__init__(intents=intents)
-        self._start_time = time.monotonic()
 
-    async def setup_hook(self):
-        # بيتكال أوتوماتيك بعد login وقبل gateway
-        self.loop.create_task(self.monitor_loop())
-        
     async def on_ready(self):
         print(f"✅ FireHire Bot online as {self.user}")
-        await self.monitor_loop()
+        await self.run_check()
+        await self.close()
 
-    async def monitor_loop(self):
-        print(f"⏰ Monitor loop started — interval={CHECK_INTERVAL_SECONDS}s | max runtime={MAX_RUNTIME_MINUTES}min")
-
+    async def run_check(self):
+        # جيب الـ channel
         try:
             channel = await self.fetch_channel(CHANNEL_ID)
-            print(f"✅ Channel found: #{channel.name}")
         except Exception as e:
-            print(f"❌ Channel fetch failed: {e}")
-            await self.close()
+            print(f"❌ Channel not found: {e}")
             return
 
-        while True:
-            elapsed_min = (time.monotonic() - self._start_time) / 60
-            if elapsed_min >= MAX_RUNTIME_MINUTES:
-                print(f"⏳ Max runtime ({MAX_RUNTIME_MINUTES}min) reached. Closing gracefully...")
-                await self.close()
-                return
+        # جيب الداتا من الشيت
+        try:
+            rows = get_sheet_data()
+        except Exception as e:
+            print(f"❌ Google Sheets error: {e}")
+            print(traceback.format_exc())
+            return
 
-            print(f"🔍 Running check... (elapsed: {elapsed_min:.1f}min)")
-            await run_check(channel)
-            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+        state           = load_state()
+        seen_emails     = set(state.get("seen_emails", []))
+        feedback_states = state.get("feedback_states", {})
+        new_seen        = set(seen_emails)
+        new_feedback    = dict(feedback_states)
+
+        for row in rows:
+            key = get_row_key(row)
+            if not key:
+                continue
+
+            # ── سابميشن جديد ──
+            if key not in seen_emails:
+                print(f"🆕 New submission: {key}")
+                embed = build_new_submission_embed(row)
+                try:
+                    await channel.send(
+                        content="📣 **New Application** — Please review and assign!",
+                        embed=embed
+                    )
+                except Exception as e:
+                    print(f"❌ Discord send error: {e}")
+                new_seen.add(key)
+
+            # ── فيدباك اتغير ──
+            current_fb = get_feedback_state(row)
+            old_fb     = feedback_states.get(key, {})
+
+            for col in FEEDBACK_COLS:
+                old_val = old_fb.get(col, "")
+                new_val = current_fb.get(col, "")
+                if new_val and new_val != old_val:
+                    print(f"🔄 Feedback changed [{col}]: {key} → {new_val}")
+                    embed = build_feedback_embed(row, col, new_val)
+                    try:
+                        await channel.send(
+                            content="📣 **New Feedback Update** — Please review and notify the candidate if needed.",
+                            embed=embed
+                        )
+                    except Exception as e:
+                        print(f"❌ Discord send error: {e}")
+
+            new_feedback[key] = current_fb
+
+        save_state({
+            "seen_emails":     list(new_seen),
+            "feedback_states": new_feedback
+        })
+        print(f"✅ Check complete — {len(rows)} rows processed.")
 
 
 def main():
     bot = FireHireBot()
-    bot.run(DISCORD_TOKEN, log_handler=None, log_level=10)  # debug logging
+    bot.run(DISCORD_TOKEN)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ FireHire RS — Discord Bot
 
 import os
 import json
+import time
+import asyncio
 import traceback
 import gspread
 import discord
@@ -37,6 +39,12 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
+
+# كل كام ثانية يعمل check
+CHECK_INTERVAL_SECONDS = 60
+
+# الحد الأقصى للتشغيل قبل ما يوقف نفسه (دقائق)
+MAX_RUNTIME_MINUTES = int(os.environ.get("BOT_MAX_RUNTIME_MINUTES", "330"))
 
 # ═══════════════════════════════════════════
 #  GOOGLE SHEETS
@@ -198,11 +206,25 @@ class FireHireBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         super().__init__(intents=intents)
+        self._start_time = time.monotonic()
 
     async def on_ready(self):
         print(f"✅ FireHire Bot online as {self.user}")
-        await self.run_check()
-        await self.close()
+        await self.monitor_loop()
+
+    async def monitor_loop(self):
+        print(f"⏰ Monitor loop started — interval={CHECK_INTERVAL_SECONDS}s | max runtime={MAX_RUNTIME_MINUTES}min")
+
+        while True:
+            elapsed_min = (time.monotonic() - self._start_time) / 60
+            if elapsed_min >= MAX_RUNTIME_MINUTES:
+                print(f"⏳ Max runtime ({MAX_RUNTIME_MINUTES}min) reached. Closing gracefully...")
+                await self.close()
+                return
+
+            print(f"🔍 Running check... (elapsed: {elapsed_min:.1f}min)")
+            await self.run_check()
+            await asyncio.sleep(CHECK_INTERVAL_SECONDS)
 
     async def run_check(self):
         try:

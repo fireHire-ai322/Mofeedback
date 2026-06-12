@@ -1,14 +1,13 @@
 """
 FireHire RS — Discord Bot
 - يشتغل مرة واحدة، يعمل check، ويقفل
-- GitHub Actions بيشغله كل 5 دقايق
+- GitHub Actions بيشغله كل دقيقة (عن طريق 5 checks جوه run واحد كل 5 دقايق)
 - الـ state محفوظ في GitHub Actions Cache
 """
 
 import os
 import json
 import traceback
-import asyncio
 import gspread
 import discord
 from google.oauth2.service_account import Credentials
@@ -28,6 +27,9 @@ FEEDBACK_COLS = [
     "Feedback of Call",
     "Company Feedback",
 ]
+
+# القيم اللي تستحق إشعار فيدباك (الحالة الخام في الشيت لسه ماحصلهاش "done")
+NOTIFY_VALUES = ["accepted", "rejected", "rescheduled", "no show", "not interested", "not clarified"]
 
 STATE_FILE = "last_state.json"
 
@@ -51,7 +53,6 @@ def get_sheet_data():
     sh         = gc.open_by_key(SPREADSHEET_ID)
     ws         = sh.worksheet(SHEET_NAME)
 
-    # بنقرأ الشيت يدوياً عشان نتجنب مشكلة الـ headers المكررة
     rows = ws.get_all_values()
     if not rows:
         return []
@@ -79,19 +80,37 @@ def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"seen_emails": [], "feedback_states": {}}
+    return {"notified_rows": [], "feedback_states": {}}
 
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 def get_row_key(row):
-    email = str(row.get("Email", "")).strip().lower()
-    name  = str(row.get("Full Name", "")).strip()
-    return email if email else name
+    """مفتاح فريد للصف بناءً على المحتوى — بيفضل ثابت حتى لو الصف اتنقل أو الإيميل اتكرر"""
+    timestamp = str(row.get("Timestamp", "")).strip()
+    email     = str(row.get("Email", "")).strip().lower()
+    name      = str(row.get("Full Name", "")).strip().lower()
+    phone     = str(row.get("Phone Number", "") or row.get("Phone", "")).strip()
+
+    if timestamp:
+        # التايمستامب وحده مميز بما يكفي لكل سابميشن (كل سابميشن وقته مختلف)
+        return f"ts:{timestamp}"
+    if email:
+        return f"email:{email}"
+    return f"name_phone:{name}|{phone}"
 
 def get_feedback_state(row):
     return {col: str(row.get(col, "")).strip() for col in FEEDBACK_COLS}
+
+def is_notifiable_feedback(value):
+    """القيمة دي تستحق إشعار؟ (accepted/rejected/... بدون done)"""
+    v = value.lower().strip()
+    if not v:
+        return False
+    if v.startswith("done"):
+        return False
+    return any(nv in v for nv in NOTIFY_VALUES)
 
 # ═══════════════════════════════════════════
 #  DISCORD EMBEDS
@@ -186,14 +205,12 @@ class FireHireBot(discord.Client):
         await self.close()
 
     async def run_check(self):
-        # جيب الـ channel
         try:
             channel = await self.fetch_channel(CHANNEL_ID)
         except Exception as e:
             print(f"❌ Channel not found: {e}")
             return
 
-        # جيب الداتا من الشيت
         try:
             rows = get_sheet_data()
         except Exception as e:
@@ -202,9 +219,9 @@ class FireHireBot(discord.Client):
             return
 
         state           = load_state()
-        seen_emails     = set(state.get("seen_emails", []))
+        notified_rows   = set(state.get("notified_rows", []))
         feedback_states = state.get("feedback_states", {})
-        new_seen        = set(seen_emails)
+        new_notified    = set(notified_rows)
         new_feedback    = dict(feedback_states)
 
         for row in rows:
@@ -212,28 +229,31 @@ class FireHireBot(discord.Client):
             if not key:
                 continue
 
-            # ── سابميشن جديد ──
-            if key not in seen_emails:
-                print(f"🆕 New submission: {key}")
-                embed = build_new_submission_embed(row)
-                try:
-                    await channel.send(
-                        content="📣 **New Application** — Please review and assign!",
-                        embed=embed
-                    )
-                except Exception as e:
-                    print(f"❌ Discord send error: {e}")
-                new_seen.add(key)
+            # ── 1) صف جديد بالكامل لم يُشعَر به قبل ──
+            if key not in notified_rows:
+                # نتأكد إن الصف فيه بيانات أساسية (مش صف فاضي اتقرا غلط)
+                if (row.get("Full Name", "").strip() or row.get("Email", "").strip()):
+                    print(f"🆕 New row: {key}")
+                    embed = build_new_submission_embed(row)
+                    try:
+                        await channel.send(
+                            content="📣 **New Application** — Please review and assign!",
+                            embed=embed
+                        )
+                    except Exception as e:
+                        print(f"❌ Discord send error: {e}")
+                    new_notified.add(key)
 
-            # ── فيدباك اتغير ──
+            # ── 2) فيدباك جديد يستحق إشعار (accepted/rejected/... بدون done) ──
             current_fb = get_feedback_state(row)
             old_fb     = feedback_states.get(key, {})
 
             for col in FEEDBACK_COLS:
                 old_val = old_fb.get(col, "")
                 new_val = current_fb.get(col, "")
-                if new_val and new_val != old_val:
-                    print(f"🔄 Feedback changed [{col}]: {key} → {new_val}")
+
+                if new_val != old_val and is_notifiable_feedback(new_val):
+                    print(f"🔄 Feedback changed [{col}]: row {key} → {new_val}")
                     embed = build_feedback_embed(row, col, new_val)
                     try:
                         await channel.send(
@@ -246,7 +266,7 @@ class FireHireBot(discord.Client):
             new_feedback[key] = current_fb
 
         save_state({
-            "seen_emails":     list(new_seen),
+            "notified_rows":   list(new_notified),
             "feedback_states": new_feedback
         })
         print(f"✅ Check complete — {len(rows)} rows processed.")

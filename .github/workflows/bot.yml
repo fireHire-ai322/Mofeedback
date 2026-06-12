@@ -1,26 +1,27 @@
-name: FireHire Discord Bot
+name: FireHire Discord Bot 24/7
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: '0 */6 * * *'   # يشتغل كل 6 ساعات (حد GitHub Actions)
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360   # 6 ساعات كاملة
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5.6.0
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Restore state cache
         uses: actions/cache@v4
@@ -32,51 +33,12 @@ jobs:
       - name: Install dependencies
         run: pip install discord.py gspread google-auth
 
-      - name: Run check 1
+      - name: Run Bot (5.5-hour window)
         env:
           DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
           SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python bot.py
-
-      - name: Wait 60s
-        run: sleep 60
-
-      - name: Run check 2
-        env:
-          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
-          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python bot.py
-
-      - name: Wait 60s
-        run: sleep 60
-
-      - name: Run check 3
-        env:
-          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
-          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python bot.py
-
-      - name: Wait 60s
-        run: sleep 60
-
-      - name: Run check 4
-        env:
-          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
-          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python bot.py
-
-      - name: Wait 60s
-        run: sleep 60
-
-      - name: Run check 5
-        env:
-          DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
-          SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          BOT_MAX_RUNTIME_MINUTES: '330'
         run: python bot.py
 
       - name: Save state cache

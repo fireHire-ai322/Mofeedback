@@ -73,7 +73,7 @@ def get_sheet_data():
         row_dict = {}
         for i, val in enumerate(row):
             if i < len(headers):
-                key = headers[i] if headers[i] else f"_col_{i}"
+                    key = headers[i] if headers[i] else f"_col_{i}"
                 row_dict[key] = val
         data.append(row_dict)
 
@@ -245,6 +245,22 @@ class FireHireBot(discord.Client):
         feedback_states = state.get("feedback_states", {})
         new_notified    = set(notified_rows)
         new_feedback    = dict(feedback_states)
+
+        is_first_run = len(notified_rows) == 0 and len(feedback_states) == 0
+        if is_first_run:
+            print(f"🚀 First run — seeding {len(rows)} rows silently.")
+            for row in rows:
+                key = get_row_key(row)
+                if not key:
+                    continue
+                new_notified.add(key)
+                new_feedback[key] = get_feedback_state(row)
+            save_state({
+                "notified_rows":   list(new_notified),
+                "feedback_states": new_feedback
+            })
+            print("✅ Seeded. Next check will notify new rows only.")
+            return
 
         for row in rows:
             key = get_row_key(row)

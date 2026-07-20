@@ -1,38 +1,31 @@
 name: FireHire Discord Bot 24/7
-
 on:
   schedule:
-    - cron: '0 */6 * * *'   # يشتغل كل 6 ساعات (حد GitHub Actions)
+    - cron: '0 */6 * * *'
   workflow_dispatch:
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # 6 ساعات كاملة
+    timeout-minutes: 360
     permissions:
       contents: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
-
       - name: Setup Python
         uses: actions/setup-python@v5.6.0
         with:
           python-version: '3.11'
-
       - name: Restore state cache
         uses: actions/cache@v4
         with:
           path: last_state.json
-          key: firehire-state-v1
-          restore-keys: firehire-state-v1
-
+          key: firehire-state-v1-${{ github.run_id }}
+          restore-keys: firehire-state-v1-
       - name: Install dependencies
         run: pip install discord.py gspread google-auth
-
       - name: Run Bot (5.5-hour window)
         env:
           DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
@@ -40,10 +33,9 @@ jobs:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           BOT_MAX_RUNTIME_MINUTES: '330'
         run: python bot.py
-
       - name: Save state cache
         uses: actions/cache/save@v4
         if: always()
         with:
           path: last_state.json
-          key: firehire-state-v1
+          key: firehire-state-v1-${{ github.run_id }}

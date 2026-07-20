@@ -30,7 +30,6 @@ FEEDBACK_COLS = [
     "Company Feedback",
 ]
 
-# القيم اللي تستحق إشعار فيدباك (الحالة الخام في الشيت لسه ماحصلهاش "done")
 NOTIFY_VALUES = ["accepted", "rejected", "rescheduled", "no show", "not interested", "not clarified"]
 
 STATE_FILE = "last_state.json"
@@ -40,10 +39,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# كل كام ثانية يعمل check
 CHECK_INTERVAL_SECONDS = 60
-
-# الحد الأقصى للتشغيل قبل ما يوقف نفسه (دقائق)
 MAX_RUNTIME_MINUTES = int(os.environ.get("BOT_MAX_RUNTIME_MINUTES", "330"))
 
 # ═══════════════════════════════════════════
@@ -73,7 +69,7 @@ def get_sheet_data():
         row_dict = {}
         for i, val in enumerate(row):
             if i < len(headers):
-                    key = headers[i] if headers[i] else f"_col_{i}"
+                key = headers[i] if headers[i] else f"_col_{i}"
                 row_dict[key] = val
         data.append(row_dict)
 
@@ -95,14 +91,12 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 def get_row_key(row):
-    """مفتاح فريد للصف بناءً على المحتوى — بيفضل ثابت حتى لو الصف اتنقل أو الإيميل اتكرر"""
     timestamp = str(row.get("Timestamp", "")).strip()
     email     = str(row.get("Email", "")).strip().lower()
     name      = str(row.get("Full Name", "")).strip().lower()
     phone     = str(row.get("Phone Number", "") or row.get("Phone", "")).strip()
 
     if timestamp:
-        # التايمستامب وحده مميز بما يكفي لكل سابميشن (كل سابميشن وقته مختلف)
         return f"ts:{timestamp}"
     if email:
         return f"email:{email}"
@@ -112,7 +106,6 @@ def get_feedback_state(row):
     return {col: str(row.get(col, "")).strip() for col in FEEDBACK_COLS}
 
 def is_notifiable_feedback(value):
-    """القيمة دي تستحق إشعار؟ (accepted/rejected/... بدون done)"""
     v = value.lower().strip()
     if not v:
         return False
@@ -246,6 +239,7 @@ class FireHireBot(discord.Client):
         new_notified    = set(notified_rows)
         new_feedback    = dict(feedback_states)
 
+        # ── First Run: لو الـ state فاضي، seed بدون notifications ──
         is_first_run = len(notified_rows) == 0 and len(feedback_states) == 0
         if is_first_run:
             print(f"🚀 First run — seeding {len(rows)} rows silently.")
@@ -269,7 +263,6 @@ class FireHireBot(discord.Client):
 
             # ── 1) صف جديد بالكامل لم يُشعَر به قبل ──
             if key not in notified_rows:
-                # نتأكد إن الصف فيه بيانات أساسية (مش صف فاضي اتقرا غلط)
                 if (row.get("Full Name", "").strip() or row.get("Email", "").strip()):
                     print(f"🆕 New row: {key}")
                     embed = build_new_submission_embed(row)
@@ -282,7 +275,7 @@ class FireHireBot(discord.Client):
                         print(f"❌ Discord send error: {e}")
                     new_notified.add(key)
 
-            # ── 2) فيدباك جديد يستحق إشعار (accepted/rejected/... بدون done) ──
+            # ── 2) فيدباك جديد يستحق إشعار ──
             current_fb = get_feedback_state(row)
             old_fb     = feedback_states.get(key, {})
 

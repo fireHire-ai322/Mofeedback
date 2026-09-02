@@ -13,6 +13,7 @@ import traceback
 import gspread
 import discord
 from google.oauth2.service_account import Credentials
+from supabase import create_client
 from datetime import datetime, timezone
 
 # ═══════════════════════════════════════════
@@ -24,11 +25,20 @@ CHANNEL_ID     = 1511896531786268712
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 SHEET_NAME     = "The Validation"
 
-FEEDBACK_COLS = [
+# الفلو الجديد (صفحة Apply) بيكتب مباشرة في Supabase من غير ما يعدي على الشيت،
+# فالبوت دلوقتي بيراقب المصدرين مع بعض على نفس القناة.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+sb = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+if not sb:
+    print("⚠️ SUPABASE_URL / SUPABASE_SERVICE_KEY not set — skipping Supabase monitoring, sheet-only mode.")
+
+FEEDBACK_COLS    = [
     "Feedback of VN",
     "Feedback of Call",
     "Company Feedback",
 ]
+FEEDBACK_COLS_SB = ["vn_feedback", "call_feedback", "company_feedback"]
 
 NOTIFY_VALUES = ["accepted", "rejected", "rescheduled", "no show", "not interested", "not clarified"]
 
@@ -77,14 +87,62 @@ def get_sheet_data():
     return data
 
 # ═══════════════════════════════════════════
+#  SUPABASE (candidates table — الفلو الجديد اللي بيتخطى الشيت)
+# ═══════════════════════════════════════════
+
+def get_supabase_rows():
+    if not sb:
+        return []
+    resp = sb.table("candidates").select("*").order("created_at", desc=False).execute()
+    return resp.data or []
+
+def normalize_supabase_row(row):
+    """بتحوّل صف candidates (Supabase) لنفس شكل الديكشنري اللي embed builders
+    اتصممت عليه أصلاً على شيت الـ Google (نفس أسماء المفاتيح بالظبط)،
+    مع الاحتفاظ بالـ id وأعمدة الفيدباك الأصلية جوه نفس الديكت."""
+    return {
+        "Full Name": row.get("name", ""),
+        "Company Name you are applying for": row.get("company", ""),
+        "Recruiter Name": row.get("recruiter_name", ""),
+        "Team Leader Name ": row.get("team_leader", ""),
+        "Phone Number": row.get("phone", ""),
+        "Email": row.get("email", ""),
+        "Nationality": row.get("nationality", ""),
+        "Graduation": row.get("graduation", ""),
+        "Experience In Customer Services/Telesales/CC": row.get("cc_experience", ""),
+        "Meeting Link": row.get("vocaroo_link", ""),
+        "CV Link": row.get("cv_link", ""),
+        "_id": row.get("id"),
+        "vn_feedback": row.get("vn_feedback", ""),
+        "call_feedback": row.get("call_feedback", ""),
+        "company_feedback": row.get("company_feedback", ""),
+    }
+
+def get_row_key_sb(row):
+    return f"sb:{row.get('_id')}" if row.get("_id") is not None else ""
+
+# ═══════════════════════════════════════════
 #  STATE MANAGEMENT
 # ═══════════════════════════════════════════
 
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"notified_rows": [], "feedback_states": {}}
+            raw = json.load(f)
+    else:
+        raw = {}
+
+    # توافق مع الشكل القديم (فلات، شيت بس) — لو لسه موجود، بيتحط تحت "sheet"
+    # وقسم "supabase" بيبدأ فاضي (يعني first-run seed هيحصل له لوحده من غير
+    # ما يعيد إشعار أي حاجة من الشيت القديمة).
+    if "sheet" not in raw and "supabase" not in raw:
+        raw = {
+            "sheet":    {"notified_rows": raw.get("notified_rows", []), "feedback_states": raw.get("feedback_states", {})},
+            "supabase": {"notified_rows": [],                            "feedback_states": {}},
+        }
+    raw.setdefault("sheet",    {"notified_rows": [], "feedback_states": {}})
+    raw.setdefault("supabase", {"notified_rows": [], "feedback_states": {}})
+    return raw
 
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
@@ -104,6 +162,9 @@ def get_row_key(row):
 
 def get_feedback_state(row):
     return {col: str(row.get(col, "")).strip() for col in FEEDBACK_COLS}
+
+def get_feedback_state_sb(row):
+    return {col: str(row.get(col) or "").strip() for col in FEEDBACK_COLS_SB}
 
 def is_notifiable_feedback(value):
     v = value.lower().strip()
@@ -138,6 +199,9 @@ def build_new_submission_embed(row):
     vocaroo = row.get("Vocaroo Link \nNotice : on this link https://vocaroo.com , rec or Upload your Voice Note , and put here your Vocaroo Link To validate it", "") or row.get("Meeting Link", "")
     if vocaroo:
         embed.add_field(name="🎙️ Vocaroo Link", value=vocaroo, inline=False)
+    cv = row.get("CV Link", "")
+    if cv:
+        embed.add_field(name="📄 CV", value=cv, inline=False)
     embed.set_footer(text="FireHire RS | Form Submission")
     return embed
 
@@ -164,11 +228,11 @@ def build_feedback_embed(row, col, new_val):
     else:
         color, emoji, label = 0x2563EB, "🔔", new_val
 
-    if "VN" in col or "vn" in col.lower():
+    if "vn" in col.lower():
         stage = "🎙️ Voice Note Stage"
-    elif "Call" in col:
+    elif "call" in col.lower():
         stage = "📞 Call Interview Stage"
-    elif "Company" in col:
+    elif "company" in col.lower():
         stage = "🏢 Company Feedback Stage"
     else:
         stage = col
@@ -226,45 +290,71 @@ class FireHireBot(discord.Client):
             print(f"❌ Channel not found: {e}")
             return
 
+        state = load_state()
+
+        # ── مصدر 1: Google Sheet (الفلو القديم) ──
         try:
             rows = get_sheet_data()
+            state["sheet"] = await self.process_source(
+                channel, rows, state["sheet"],
+                key_fn=get_row_key,
+                fb_fn=get_feedback_state,
+                fb_cols=FEEDBACK_COLS,
+                new_row_valid_fn=lambda row: (row.get("Full Name", "").strip() or row.get("Email", "").strip()),
+                source_label="Sheet",
+            )
         except Exception as e:
             print(f"❌ Google Sheets error: {e}")
             print(traceback.format_exc())
-            return
 
-        state           = load_state()
-        notified_rows   = set(state.get("notified_rows", []))
-        feedback_states = state.get("feedback_states", {})
+        # ── مصدر 2: Supabase candidates (فلو Apply الجديد) ──
+        if sb:
+            try:
+                sb_rows = get_supabase_rows()
+                normalized = [normalize_supabase_row(r) for r in sb_rows]
+                state["supabase"] = await self.process_source(
+                    channel, normalized, state["supabase"],
+                    key_fn=get_row_key_sb,
+                    fb_fn=get_feedback_state_sb,
+                    fb_cols=FEEDBACK_COLS_SB,
+                    new_row_valid_fn=lambda row: (row.get("Full Name", "").strip() or row.get("Email", "").strip()),
+                    source_label="Supabase",
+                )
+            except Exception as e:
+                print(f"❌ Supabase error: {e}")
+                print(traceback.format_exc())
+
+        save_state(state)
+        print("✅ Check complete.")
+
+    async def process_source(self, channel, rows, source_state, key_fn, fb_fn, fb_cols, new_row_valid_fn, source_label):
+        notified_rows   = set(source_state.get("notified_rows", []))
+        feedback_states = source_state.get("feedback_states", {})
         new_notified    = set(notified_rows)
         new_feedback    = dict(feedback_states)
 
-        # ── First Run: لو الـ state فاضي، seed بدون notifications ──
+        # ── First Run لهذا المصدر بس: لو الـ state فاضي، seed بدون notifications ──
         is_first_run = len(notified_rows) == 0 and len(feedback_states) == 0
         if is_first_run:
-            print(f"🚀 First run — seeding {len(rows)} rows silently.")
+            print(f"🚀 [{source_label}] First run — seeding {len(rows)} rows silently.")
             for row in rows:
-                key = get_row_key(row)
+                key = key_fn(row)
                 if not key:
                     continue
                 new_notified.add(key)
-                new_feedback[key] = get_feedback_state(row)
-            save_state({
-                "notified_rows":   list(new_notified),
-                "feedback_states": new_feedback
-            })
-            print("✅ Seeded. Next check will notify new rows only.")
-            return
+                new_feedback[key] = fb_fn(row)
+            print(f"✅ [{source_label}] Seeded. Next check will notify new rows only.")
+            return {"notified_rows": list(new_notified), "feedback_states": new_feedback}
 
         for row in rows:
-            key = get_row_key(row)
+            key = key_fn(row)
             if not key:
                 continue
 
             # ── 1) صف جديد بالكامل لم يُشعَر به قبل ──
             if key not in notified_rows:
-                if (row.get("Full Name", "").strip() or row.get("Email", "").strip()):
-                    print(f"🆕 New row: {key}")
+                if new_row_valid_fn(row):
+                    print(f"🆕 [{source_label}] New row: {key}")
                     embed = build_new_submission_embed(row)
                     try:
                         await channel.send(
@@ -276,15 +366,15 @@ class FireHireBot(discord.Client):
                     new_notified.add(key)
 
             # ── 2) فيدباك جديد يستحق إشعار ──
-            current_fb = get_feedback_state(row)
+            current_fb = fb_fn(row)
             old_fb     = feedback_states.get(key, {})
 
-            for col in FEEDBACK_COLS:
+            for col in fb_cols:
                 old_val = old_fb.get(col, "")
                 new_val = current_fb.get(col, "")
 
                 if new_val != old_val and is_notifiable_feedback(new_val):
-                    print(f"🔄 Feedback changed [{col}]: row {key} → {new_val}")
+                    print(f"🔄 [{source_label}] Feedback changed [{col}]: row {key} → {new_val}")
                     embed = build_feedback_embed(row, col, new_val)
                     try:
                         await channel.send(
@@ -296,11 +386,8 @@ class FireHireBot(discord.Client):
 
             new_feedback[key] = current_fb
 
-        save_state({
-            "notified_rows":   list(new_notified),
-            "feedback_states": new_feedback
-        })
-        print(f"✅ Check complete — {len(rows)} rows processed.")
+        print(f"✅ [{source_label}] {len(rows)} rows processed.")
+        return {"notified_rows": list(new_notified), "feedback_states": new_feedback}
 
 
 def main():

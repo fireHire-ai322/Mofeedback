@@ -31,6 +31,8 @@ jobs:
           DISCORD_TOKEN:      ${{ secrets.DISCORD_TOKEN }}
           SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           BOT_MAX_RUNTIME_MINUTES: '330'
         run: python bot.py
       - name: Save state cache
